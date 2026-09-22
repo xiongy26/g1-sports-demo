@@ -4,8 +4,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import loadMujoco from '../vendor/mujoco/mujoco.js';
 import { MujocoVisualizer } from './visualizer.js';
 import { BasketballController } from './basketball.js';
-import { PingpongController } from './pingpong.js';
-import { buildJointMap, bodyId, jointId, keyId, setBasePose, applyBalanceAssist } from './util.js';
+import { PingpongController, DuelController } from './pingpong.js';
+import { buildJointMap, bodyId, jointId, keyId, setBasePose, applyBalanceAssist, REST_POSE } from './util.js';
+import { buildModelXml } from './scene_merge.js';
 
 const TIMESTEP = 0.002;
 
@@ -41,19 +42,6 @@ async function fetchAssets() {
   return { sceneXml, g1Xml, bufs };
 }
 
-// 把 <include file="g1.xml"/> 替换为 g1.xml 的顶层内容，编译为单一 XML 字符串
-function mergeInclude(sceneXml, g1Xml) {
-  const doc = new DOMParser().parseFromString(sceneXml, 'text/xml');
-  const g1 = new DOMParser().parseFromString(g1Xml, 'text/xml');
-  const inc = doc.querySelector('include');
-  if (!inc) throw new Error('scene_gym.xml 中没有 <include>');
-  for (const child of [...g1.documentElement.children]) {
-    inc.parentNode.insertBefore(doc.importNode(child, true), inc);
-  }
-  inc.remove();
-  return new XMLSerializer().serializeToString(doc);
-}
-
 // ---------------- 场景 / 灯光 ----------------
 function buildThreeScene() {
   const scene = new THREE.Scene();
@@ -87,7 +75,7 @@ async function main() {
 
   const { sceneXml, g1Xml, bufs } = await fetchAssets();
   showLoad('编译 MJCF 模型…', 1);
-  const mergedXml = mergeInclude(sceneXml, g1Xml);
+  const mergedXml = buildModelXml(sceneXml, g1Xml);
 
   const vfs = new mujoco.MjVFS();
   for (const [name, buf] of bufs) vfs.addBuffer('assets/' + name, buf);
@@ -102,7 +90,7 @@ async function main() {
     throw new Error('模型编译失败: ' + (e && e.message ? e.message : e));
   }
   const data = new mujoco.MjData(model);
-  if (model.nq !== 43 || model.nu !== 29) throw new Error(`意外的模型规模 nq=${model.nq} nu=${model.nu}`);
+  if (model.nq !== 79 || model.nu !== 58) throw new Error(`意外的模型规模 nq=${model.nq} nu=${model.nu}`);
 
   // 名字 -> 索引
   const jmap = buildJointMap(mujoco, model, JOINT_NAMES);
@@ -120,6 +108,13 @@ async function main() {
     })(),
     ttBallMid: model.body_mocapid[bodyId(mujoco, model, 'tt_ball')],
     paddleMid: model.body_mocapid[bodyId(mujoco, model, 'paddle')],
+    paddleMid2: model.body_mocapid[bodyId(mujoco, model, 'paddle_r2')],
+    machineMid: model.body_mocapid[bodyId(mujoco, model, 'tt_machine')],
+    // 二号机（r2_ 前缀，双机对打用）
+    r2WristBid: bodyId(mujoco, model, 'r2_right_wrist_yaw_link'),
+    r2PelvisBid: bodyId(mujoco, model, 'r2_pelvis'),
+    r2Qadr: model.jnt_qposadr[jointId(mujoco, model, 'r2_floating_base_joint')],
+    r2Dof: model.jnt_dofadr[jointId(mujoco, model, 'r2_floating_base_joint')],
     onScore: () => { score++; $('score').textContent = score; flash('投进了！🏀'); },
     onShot: () => {},
     onRally: (n) => { $('score').textContent = n; },
@@ -150,7 +145,10 @@ async function main() {
   const controllers = {
     basketball: new BasketballController(env),
     pingpong: new PingpongController(env),
+    duel: new DuelController(env),
   };
+  // 二号机待机位（非对打模式：站在场地边观看）
+  const R2_REST = { x: -5.7, y: -1.9, yaw: 0.6 };
   let mode = 'basketball';
   let paused = false;
   let speed = 1;
@@ -162,18 +160,25 @@ async function main() {
     mode = m;
     const key = keyId(mujoco, model, 'home');
     mujoco.mj_resetDataKeyframe(model, data, key);
-    if (m === 'pingpong') setBasePose(data, -1.15, 0, 0.783675, Math.PI);
-    else setBasePose(data, 0, 0, 0.783675, 0);
+    if (m === 'basketball') setBasePose(data, 0, 0, 0.783675, 0);
+    else setBasePose(data, -1.15, 0, 0.783675, Math.PI); // 乒乓球/对打：一号机站球台右端
+    // 二号机：对打站球台另一端；其它模式在场边待机
+    if (m === 'duel') setBasePose(data, -4.65, 0, 0.783675, 0, env.r2Qadr, env.r2Dof);
+    else setBasePose(data, R2_REST.x, R2_REST.y, 0.783675, R2_REST.yaw, env.r2Qadr, env.r2Dof);
     // 隐藏不相关的道具：TT 球和球拍移到地下；篮球放回手中/角落
     const hidden = [0, 0, -5];
-    const parkTT = m !== 'pingpong';
+    const parkTT = m !== 'pingpong' && m !== 'duel';
     if (parkTT) {
       data.mocap_pos.set(hidden, 3 * env.ttBallMid);
       data.mocap_pos.set(hidden, 3 * env.paddleMid);
+      data.mocap_pos.set(hidden, 3 * env.paddleMid2);
       data.qpos[env.ballQadr] = 3.4; data.qpos[env.ballQadr + 1] = 1.8; data.qpos[env.ballQadr + 2] = 0.123;
       data.qvel[env.ballDadr] = 0; data.qvel[env.ballDadr + 1] = 0; data.qvel[env.ballDadr + 2] = 0;
       model.geom_contype[env.ballGid] = 1; model.geom_conaffinity[env.ballGid] = 1;
     }
+    // 发球机：单人乒乓球就位，双机对打藏到地下（把位置让给二号机）
+    if (m === 'pingpong') data.mocap_pos.set([-4.72, 0.25, 0], 3 * env.machineMid);
+    else if (m === 'duel') data.mocap_pos.set(hidden, 3 * env.machineMid);
     controllers[m].reset();
     mjForward();
     const c = controllers[m].cameraPreset();
@@ -183,15 +188,19 @@ async function main() {
     score = 0; $('score').textContent = '0';
     $('mode-basketball').classList.toggle('active', m === 'basketball');
     $('mode-pingpong').classList.toggle('active', m === 'pingpong');
+    $('mode-duel').classList.toggle('active', m === 'duel');
     $('action-btn').textContent = m === 'basketball' ? '投篮 🏀' : '重新发球 🏓';
     $('hint').textContent = m === 'basketball'
       ? 'G1 原地运球，周期性起跳投篮（弹道由 WASM 物理仿真）'
-      : 'G1 与对面发球机连续对打，球拍实时跟随手腕';
+      : m === 'duel'
+        ? '两台 G1 隔台正手斜线对拉，击球贴合拍面（快捷键 1/2/3 切换）'
+        : 'G1 与对面发球机连续对打，球拍实时跟随手腕（旁边是等待上场的二号机）';
   }
 
   // UI
   $('mode-basketball').onclick = () => setMode('basketball');
   $('mode-pingpong').onclick = () => setMode('pingpong');
+  $('mode-duel').onclick = () => setMode('duel');
   $('action-btn').onclick = () => controllers[mode].action();
   $('pause-btn').onclick = () => { paused = !paused; $('pause-btn').textContent = paused ? '继续' : '暂停'; };
   $('speed-sel').onchange = (e) => { speed = parseFloat(e.target.value); };
@@ -204,6 +213,7 @@ async function main() {
     if (e.code === 'Space') { e.preventDefault(); controllers[mode].action(); }
     if (e.key === '1') setMode('basketball');
     if (e.key === '2') setMode('pingpong');
+    if (e.key === '3') setMode('duel');
   });
 
   function flash(msg) {
@@ -216,12 +226,18 @@ async function main() {
 
   // ---------------- 主循环 ----------------
   let acc = 0, last = -1, fpsT = 0, fpsN = 0;
+  // 非对打模式下，二号机在场边待机站立（平衡辅助保持直立）
+  function idleR2() {
+    for (let i = 0; i < 29; i++) data.ctrl[29 + i] = REST_POSE[i];
+    applyBalanceAssist(data, env.r2PelvisBid, R2_REST.x, R2_REST.y, 1.0, env.r2Dof);
+  }
   function stepFrame(dt) {
     if (!paused) {
       acc += dt * speed;
       const maxN = Math.ceil(dt / TIMESTEP) + 8;
       let n = 0;
       while (acc >= TIMESTEP && n < maxN) {
+        if (mode !== 'duel') idleR2();
         controllers[mode].step(TIMESTEP);
         mujoco.mj_step(model, data);
         acc -= TIMESTEP;
@@ -278,6 +294,7 @@ async function main() {
           const maxN = Math.ceil(dt / TIMESTEP) + 8;
           let k = 0;
           while (acc >= TIMESTEP && k < maxN) {
+            if (mode !== 'duel') idleR2();
             controllers[mode].step(TIMESTEP);
             mujoco.mj_step(model, data);
             acc -= TIMESTEP;

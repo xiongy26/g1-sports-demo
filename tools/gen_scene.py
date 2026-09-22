@@ -119,11 +119,13 @@ xml = f'''<mujoco model="g1_sports_gym">
       <geom name="tt_post_r" type="cylinder" size="0.01 0.085" pos="0 -0.7825 {TABLE_H+0.075}" material="steel"/>
     </body>
 
-    <!-- ==================== ball machine (opponent) ==================== -->
-    <body name="tt_machine" pos="-4.72 0.25 0">
+    <!-- ==================== ball machine (opponent) ====================
+         炮管沿实际出球仰角(约15°)指向机器人一侧；出球点 A 在炮口处（见 src/pingpong.js）。
+         mocap 体：双机对打模式下移到地下隐藏，给二号机让位 -->
+    <body name="tt_machine" mocap="true" pos="-4.72 0.25 0">
       <geom name="machine_body" type="box" size="0.16 0.16 0.19" pos="0 0 1.0" material="machine"/>
       <geom name="machine_barrel" type="cylinder" size="0.045 0.16" pos="0.14 0 1.06" material="steel"
-            euler="0 -1.25 0"/>
+            euler="0 1.31 0"/>
       <geom name="machine_wheel_fl" type="cylinder" size="0.045 0.02" pos="0.06 0.17 0.045" material="steel" euler="1.5708 0 0"/>
       <geom name="machine_wheel_fr" type="cylinder" size="0.045 0.02" pos="0.06 -0.17 0.045" material="steel" euler="1.5708 0 0"/>
       <geom name="machine_wheel_bl" type="cylinder" size="0.045 0.02" pos="-0.06 0.17 0.045" material="steel" euler="1.5708 0 0"/>
@@ -142,12 +144,20 @@ xml = f'''<mujoco model="g1_sports_gym">
       <geom name="paddle_blade_face" type="cylinder" size="0.084 0.004" pos="0 0 0.009" rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
       <geom name="paddle_handle" type="box" size="0.013 0.018 0.05" pos="0 0 -0.062" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
     </body>
+
+    <!-- second paddle for the duel mode (二号机，默认停放在地下) -->
+    <body name="paddle_r2" mocap="true" pos="0 0 -5">
+      <geom name="paddle_r2_blade" type="cylinder" size="0.085 0.008" rgba="0.8 0.25 0.15 1" contype="0" conaffinity="0"/>
+      <geom name="paddle_r2_blade_face" type="cylinder" size="0.084 0.004" pos="0 0 0.009" rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
+      <geom name="paddle_r2_handle" type="box" size="0.013 0.018 0.05" pos="0 0 -0.062" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
+    </body>
   </worldbody>
 
   <keyframe>
+    <!-- qpos 顺序 = 模型内自由体顺序: 一号机(36) + 二号机(36, 对打站位) + 篮球(7, 场边停放) -->
     <key name="home"
-      qpos="0 0 0.783675 1 0 0 0 -0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0"
-      ctrl="-0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0"/>
+      qpos="0 0 0.783675 1 0 0 0 -0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0 -4.65 0 0.783675 1 0 0 0 -0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0 3.4 1.8 0.123 1 0 0 0"
+      ctrl="-0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0 -0.1 0 0 0.3 -0.2 0 -0.1 0 0 0.3 -0.2 0 0 0 0 0.2 0.2 0 1.28 0 0 0 0.2 -0.2 0 1.28 0 0 0"/>
   </keyframe>
 </mujoco>
 '''

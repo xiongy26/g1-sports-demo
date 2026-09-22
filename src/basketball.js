@@ -12,6 +12,12 @@ const HOME = [
   0.2, -0.2, 0, 1.28, 0, 0, 0, // 右臂
 ];
 
+// 托球位姿（right_wrist_yaw_link 系）：掌面 = -y（右手自然下垂时贴大腿），
+// 锚点取掌心表面；球心 = 锚点沿掌面法向外推 (球半径 - 陷入量)，视觉上托在掌心。
+const SEAT_LOCAL = [0.10, -0.022 - (0.123 - 0.02), 0.008];
+// 出手时腕角（标定，tools/probe_contact.mjs 网格解）：掌心转到球的下方托住出球方向
+const RELEASE_WRIST = { r: -1.00, p: -0.60, y: 0.95 };
+
 export class BasketballController {
   constructor(env) {
     this.env = env;
@@ -24,6 +30,7 @@ export class BasketballController {
       lEl: j.left_elbow_joint.c, lWrP: j.left_wrist_pitch_joint.c,
       rShP: j.right_shoulder_pitch_joint.c, rShR: j.right_shoulder_roll_joint.c, rShY: j.right_shoulder_yaw_joint.c,
       rEl: j.right_elbow_joint.c, rWrP: j.right_wrist_pitch_joint.c, rWrR: j.right_wrist_roll_joint.c,
+      rWrY: j.right_wrist_yaw_joint.c,
     };
     this.goal = Float64Array.from(HOME);
     this.smoothed = Float64Array.from(HOME);
@@ -38,7 +45,7 @@ export class BasketballController {
     this.shootAt = 5 + 3 * Math.random();
     this.freq = 1.55;
     this.goal.set(HOME); this.smoothed.set(HOME);
-    this.placeBallAtPalm(0.17);
+    this.placeBallAtSeat();
     const v = data.qvel; v[ballQadr] = 0; v[ballQadr + 1] = 0; v[ballQadr + 2] = 0;
     this.emit = null;
   }
@@ -50,12 +57,13 @@ export class BasketballController {
   }
 
   // ---------- 小工具 ----------
-  palm() {
+  // 托球点（球心应处的世界位置）：随腕系转动，手转到哪里球贴到哪里
+  seat() {
     const { data, palmBid } = this.env;
     const o = 3 * palmBid, q = 4 * palmBid;
     const pos = [data.xpos[o], data.xpos[o + 1], data.xpos[o + 2]];
     const quat = [data.xquat[q], data.xquat[q + 1], data.xquat[q + 2], data.xquat[q + 3]];
-    const off = quatRotVec(quat, [0.14, 0, 0]);
+    const off = quatRotVec(quat, SEAT_LOCAL);
     return [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
   }
   ballPos() {
@@ -75,10 +83,9 @@ export class BasketballController {
     const { data, ballDadr } = this.env;
     return [data.qvel[ballDadr], data.qvel[ballDadr + 1], data.qvel[ballDadr + 2]];
   }
-  placeBallAtPalm(up = 0.19) {
-    const P = this.palm();
-    // 世界坐标：球心在手掌稍前上方（视觉上托在手掌上）
-    this.setBallPos([P[0] + 0.04, P[1] + 0.01, P[2] + up]);
+  placeBallAtSeat() {
+    // 球心贴在掌心托球点（掌系放置，随手掌转动，视觉上托在手掌上）
+    this.setBallPos(this.seat());
     this.setBallVel([0, 0, 0]);
   }
   // 持球时关闭球的碰撞（避免与手部碰撞体挤压爆炸），释放后恢复
@@ -94,21 +101,21 @@ export class BasketballController {
     if (!isFinite(p[2])) {
       this.state = 'carry'; this.tState = 0;
       this.shootAt = this.t + 5.5 + 3.5 * Math.random();
-      this.placeBallAtPalm(0.19);
+      this.placeBallAtSeat();
       return;
     }
     if (p[2] > 5) {
       this.state = 'recover'; this.tState = 0.4;
-      this.placeBallAtPalm(0.19);
+      this.placeBallAtSeat();
       return;
     }
     if (p[2] < -0.4) {
       // 严重穿透：直接回到投篮收球流程（recover 完成时会重排 shootAt）
       if (this.state === 'flight' || this.state === 'recover') {
         this.state = 'recover'; this.tState = 0.45;
-        this.placeBallAtPalm(0.19);
+        this.placeBallAtSeat();
       } else if (this.state === 'free') {
-        this.placeBallAtPalm(0.19);
+        this.placeBallAtSeat();
         this.state = 'carry'; this.tState = 0;
       }
     } else if (this.state === 'free' && p[2] < -0.02) {
@@ -123,7 +130,7 @@ export class BasketballController {
   step(dt) {
     this.t += dt; this.tState += dt;
     this.ballSafety();
-    const P = this.palm();
+    const P = this.seat();
     this.palmVel = [
       (P[0] - this.palmPrev[0]) / dt,
       (P[1] - this.palmPrev[1]) / dt,
@@ -154,7 +161,7 @@ export class BasketballController {
       tau = 0.07;
       // 球黏在手掌上，随手上抬/下压（无碰撞）
       this.setBallCollide(false);
-      this.placeBallAtPalm(0.17 + 0.02 * s);
+      this.placeBallAtSeat(); this.setBallVel(this.palmVel);
       if (this.tState > 0.45) { // 手压到低位后放球
         const hv = this.palmVel;
         this.setBallCollide(true);
@@ -178,13 +185,15 @@ export class BasketballController {
         this.setBallVel([v[0] * 0.5, v[1] * 0.5, 3.35 + 0.25 * Math.random()]);
       }
       const p2 = this.ballPos(), v2 = this.ballVel();
-      const reached = v2[2] > 0.5 && p2[2] > P[2] - 0.30;
+      // 需在手掌附近才接球（水平 0.28m 内），避免远处瞬移
+      const reached = v2[2] > 0.5 && p2[2] > P[2] - 0.30 &&
+        Math.hypot(p2[0] - P[0], p2[1] - P[1]) < 0.28;
       if (reached || this.tState > 2.2) {
         this.state = 'carry'; this.tState = 0;
         this.freq = 1.45 + 0.25 * Math.random();
       }
     } else if (this.state === 'windup') {
-      // 双手持球上举
+      // 双手持球上举，同时旋腕让掌心转到球的下方（托球出手）
       const p = Math.min(1, this.tState / 0.45);
       const e = p * p * (3 - 2 * p);
       goal[this.ix.rShP] = -0.62 + (-1.35) * e; goal[this.ix.rEl] = (0.85) + (-0.35) * e;
@@ -192,9 +201,12 @@ export class BasketballController {
       goal[this.ix.rShR] = -0.18 - 0.1 * e; goal[this.ix.lShR] = 0.25 * e;
       goal[this.ix.waistPitch] = 0.12 - 0.08 * e;
       goal[this.ix.rKnee] = 0.3 + 0.08 * e; goal[this.ix.lKnee] = 0.3 + 0.08 * e;
+      goal[this.ix.rWrR] = RELEASE_WRIST.r * e;
+      goal[this.ix.rWrP] = 0.3 * (1 - e) + RELEASE_WRIST.p * e;
+      goal[this.ix.rWrY] = RELEASE_WRIST.y * e;
       tau = 0.05;
       this.setBallCollide(false);
-      this.placeBallAtPalm(0.19);
+      this.placeBallAtSeat();
       if (this.tState >= 0.45) {
         // 出手：从当前位置解算一条过筐的抛物线
         const T = 0.82;
@@ -210,10 +222,13 @@ export class BasketballController {
         if (this.env.onShot) this.env.onShot();
       }
     } else if (this.state === 'flight') {
-      // 出手跟随动作
+      // 出手跟随动作（保持托球腕位，腕再前压一点作随挥）
       goal[this.ix.rShP] = -2.0; goal[this.ix.rEl] = 0.45;
       goal[this.ix.lShP] = -1.35; goal[this.ix.lEl] = 0.75;
       goal[this.ix.waistPitch] = 0.04;
+      goal[this.ix.rWrR] = RELEASE_WRIST.r;
+      goal[this.ix.rWrP] = RELEASE_WRIST.p + 0.2;
+      goal[this.ix.rWrY] = RELEASE_WRIST.y;
       tau = 0.06;
       this.tF += dt;
       const T = 0.82;
@@ -250,7 +265,7 @@ export class BasketballController {
       if (this.tState > 0.5) {
         this.state = 'carry'; this.tState = 0;
         this.shootAt = this.t + 5.5 + 3.5 * Math.random();
-        this.placeBallAtPalm(0.19);
+        this.placeBallAtSeat();
       }
     }
 
