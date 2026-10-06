@@ -158,6 +158,7 @@ async function main() {
 
   function setMode(m) {
     mode = m;
+    viz.setSportMode(m);
     const key = keyId(mujoco, model, 'home');
     mujoco.mj_resetDataKeyframe(model, data, key);
     if (m === 'basketball') setBasePose(data, 0, 0, 0.783675, 0);
@@ -191,7 +192,7 @@ async function main() {
     $('mode-duel').classList.toggle('active', m === 'duel');
     $('action-btn').textContent = m === 'basketball' ? '投篮 🏀' : '重新发球 🏓';
     $('hint').textContent = m === 'basketball'
-      ? 'G1 原地运球，周期性起跳投篮（弹道由 WASM 物理仿真）'
+      ? 'G1 运球 → 收球蓄力 → 蹬伸投篮 → 压腕随挥（空格投篮）'
       : m === 'duel'
         ? '两台 G1 隔台正手斜线对拉，击球贴合拍面（快捷键 1/2/3 切换）'
         : 'G1 与对面发球机连续对打，球拍实时跟随手腕（旁边是等待上场的二号机）';

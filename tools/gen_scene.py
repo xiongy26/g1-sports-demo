@@ -142,14 +142,14 @@ xml = f'''<mujoco model="g1_sports_gym">
     <body name="paddle" mocap="true" pos="-1.3 0.2 1.0">
       <geom name="paddle_blade" type="cylinder" size="0.085 0.008" rgba="0.8 0.25 0.15 1" contype="0" conaffinity="0"/>
       <geom name="paddle_blade_face" type="cylinder" size="0.084 0.004" pos="0 0 0.009" rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
-      <geom name="paddle_handle" type="box" size="0.013 0.018 0.05" pos="0 0 -0.062" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <geom name="paddle_handle" type="box" size="0.013 0.060 0.009" pos="0 -0.125 0" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
     </body>
 
     <!-- second paddle for the duel mode (二号机，默认停放在地下) -->
     <body name="paddle_r2" mocap="true" pos="0 0 -5">
       <geom name="paddle_r2_blade" type="cylinder" size="0.085 0.008" rgba="0.8 0.25 0.15 1" contype="0" conaffinity="0"/>
       <geom name="paddle_r2_blade_face" type="cylinder" size="0.084 0.004" pos="0 0 0.009" rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
-      <geom name="paddle_r2_handle" type="box" size="0.013 0.018 0.05" pos="0 0 -0.062" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <geom name="paddle_r2_handle" type="box" size="0.013 0.060 0.009" pos="0 -0.125 0" rgba="0.7 0.6 0.4 1" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 

@@ -1,6 +1,7 @@
 // 无头仿真自检：在 node 中加载与浏览器完全相同的模型与控制器，验证三种模式的运动逻辑。
 // 用法: node tools/sim_check.mjs
 import { readFileSync, readdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import loadMujoco from '../vendor/mujoco/mujoco.js';
@@ -20,7 +21,7 @@ const JOINT_NAMES = [
 ];
 
 const TIMESTEP = 0.002;
-const { BasketballController } = await import('../src/basketball.js');
+const { BasketballController, PALM_NORMAL_LOCAL } = await import('../src/basketball.js');
 const { PingpongController, DuelController } = await import('../src/pingpong.js');
 const { buildJointMap, bodyId, jointId, keyId, setBasePose, quatRotVec, quatConj, REST_POSE, applyBalanceAssist } = await import('../src/util.js');
 
@@ -104,6 +105,17 @@ function angleDeg(a, b) {
   return Math.acos(Math.max(-1, Math.min(1, (a[0]*b[0]+a[1]*b[1]+a[2]*b[2]) / (la*lb)))) * 180 / Math.PI;
 }
 
+// 拍柄必须在拍面内延伸，不能像旧模型沿拍面法线伸出。
+for (const name of ['paddle', 'paddle_r2']) {
+  const gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM.value, name === 'paddle' ? 'paddle_handle' : 'paddle_r2_handle');
+  const sizes = Array.from(model.geom_size.slice(3 * gid, 3 * gid + 3));
+  const axis = sizes.indexOf(Math.max(...sizes));
+  const unit = [0, 0, 0]; unit[axis] = 1;
+  const direction = quatRotVec(Array.from(model.geom_quat.slice(4 * gid, 4 * gid + 4)), unit);
+  assert.ok(Math.abs(direction[2]) < 0.01, `${name} 拍柄沿拍面法线伸出`);
+  assert.ok(Math.abs(model.geom_pos[3 * gid + 2]) < 0.01, `${name} 拍柄偏离拍面`);
+}
+
 // ================= 篮球 =================
 console.log('\n--- 篮球模式 30s ---');
 let score = 0, rallies = 0;
@@ -112,6 +124,7 @@ bb.reset();
 mujoco.mj_forward(model, data);
 const states = new Map();
 let minPelZ = 9, maxBallZ = 0, minBallZ = 9;
+let dribblePalmMaxZ = -1, dribbleSamples = 0;
 // 球-掌贴合指标：windup 全程球心在腕系的滑移；出手瞬间掌面法向与出球方向夹角
 let windSlide = 0, windFirst = null;
 let releaseAngle = null, prevState = null, prevBall = null;
@@ -127,6 +140,12 @@ for (let i = 0; i < T_BB / TIMESTEP; i++) {
   const bz = ball[2];
   if (bz > maxBallZ) maxBallZ = bz;
   if (bz < minBallZ) minBallZ = bz;
+  if ((bb.state === 'carry' || bb.state === 'free') && bb.t > 0.3) {
+    // +y 是手指弯曲一侧的真实掌面；运球全周期应朝下。
+    const normal = quatRotVec(wristFrame().q, [0, 1, 0]);
+    dribblePalmMaxZ = Math.max(dribblePalmMaxZ, normal[2]);
+    dribbleSamples++;
+  }
   if (bb.state === 'windup') {
     const loc = toWristLocal(wristFrame(), ball);
     if (!windFirst) windFirst = loc;
@@ -135,7 +154,7 @@ for (let i = 0; i < T_BB / TIMESTEP; i++) {
   if (prevState === 'windup' && bb.state === 'flight' && prevBall) {
     // 出手瞬间：球速 vs 掌面法向(-y 手系)
     const v = [(ball[0]-prevBall[0])/TIMESTEP, (ball[1]-prevBall[1])/TIMESTEP, (ball[2]-prevBall[2])/TIMESTEP];
-    const nrm = quatRotVec(wristFrame().q, [0, -1, 0]);
+    const nrm = quatRotVec(wristFrame().q, PALM_NORMAL_LOCAL);
     releaseAngle = angleDeg(nrm, v);
   }
   prevState = bb.state; prevBall = ball.slice();
@@ -145,6 +164,17 @@ console.log(`进球数: ${score}  髋部最低高度: ${minPelZ.toFixed(3)} m (�
 console.log(`篮球高度范围: ${minBallZ.toFixed(2)} ~ ${maxBallZ.toFixed(2)} m (运球${maxBallZ > 0.9 && minBallZ < 0.3 ? '正常' : '异常'})`);
 console.log(`windup 球-掌滑移: ${windSlide.toFixed(3)} m ${windSlide < 0.03 ? '✓ (托在掌心)' : '✗ (球在手上漂移)'}`);
 console.log(`出手瞬间掌面-出球夹角: ${releaseAngle === null ? '未捕捉' : releaseAngle.toFixed(1) + '°' + (releaseAngle < 45 ? ' ✓ (掌心托球出手)' : ' ✗ (掌面朝向不对)')}`);
+
+console.log(`运球掌面最大向上分量: ${dribblePalmMaxZ.toFixed(3)} (应 < -0.75)`);
+assert.ok(dribbleSamples > 500 && dribblePalmMaxZ < -0.75, '运球时掌心未持续朝下');
+
+// 验证实际动力学结果，而非仅检查状态机是否运行。
+assert.ok(minPelZ > 0.70, '篮球动作导致机器人失去站立高度');
+assert.ok(Number.isFinite(maxBallZ) && minBallZ > 0.07, '篮球出现无效状态或严重穿地');
+assert.ok(states.has('gather') && states.has('windup') && states.has('flight'), '投篮阶段未完成');
+assert.ok(releaseAngle !== null && releaseAngle < 15, '实际出手掌面未对准球速');
+assert.ok(windSlide < 0.02, '举球阶段球在掌上滑移');
+assert.ok(score >= 2, '自由飞行投篮未正常完成');
 
 // ================= 乒乓球 =================
 console.log('\n--- 乒乓球模式 6s ---');

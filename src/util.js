@@ -58,8 +58,8 @@ export function quatMul(a, b) {
   ];
 }
 export function yawQuat(yaw) { return [Math.cos(yaw / 2), 0, 0, Math.sin(yaw / 2)]; }
-// 正手握拍：把球拍圆柱轴(拍面法向 +z，+z 为黑胶击球面)转到腕系 -y（掌面法向），
-// 拍面与掌面共面、拍柄穿过拳头——外观即"握手式持拍"，击球面与掌心同侧。
+// 球拍 +z 黑面朝腕系 -y，红面朝真实掌心 +y；
+// 拍柄轴为拍系 -y（腕系 -z），始终与拍面共面。
 export const PADDLE_GRIP_QUAT = [0.7071068, 0.7071068, 0, 0];
 
 // ---------- 平衡辅助（演示外挂：把躯干轻轻拉回锚点并保持直立） ----------

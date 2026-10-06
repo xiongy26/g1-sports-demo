@@ -1,6 +1,7 @@
 // three.js 渲染器：直接从 MjModel/MjData 构建 geom 网格并逐帧同步位姿。
 // 不经过 mjvScene，直接使用 geom_xpos / geom_xmat 实时视图（零拷贝）。
 import * as THREE from 'three';
+import { paddleGripGeometry } from './paddle_grip.js';
 
 const mjGEOM = { PLANE: 0, HFIELD: 1, SPHERE: 2, CAPSULE: 3, ELLIPSOID: 4, CYLINDER: 5, BOX: 6, MESH: 7 };
 
@@ -13,6 +14,7 @@ export class MujocoVisualizer {
     this.mats = [];
     this.ballMesh = null;   // 篮球（加筋线用）
 
+    this.gripHands = [];
     this._m4 = new THREE.Matrix4();
     this.build(model, scene);
   }
@@ -63,6 +65,14 @@ export class MujocoVisualizer {
       scene.add(mesh);
       this.meshes[i] = mesh;
       this.mats[i] = mat;
+      if (t === mjGEOM.MESH && ggroup[i] === 2 &&
+          ['right_wrist_yaw_link', 'r2_right_wrist_yaw_link'].includes(this.bodyName(model, gbody[i])) &&
+          gdataid[i] === this.mujoco.mj_name2id(model, this.mujoco.mjtObj.mjOBJ_MESH.value, 'right_rubber_hand')) {
+        const gp = Array.from(model.geom_pos.slice(3 * i, 3 * i + 3));
+        const gq = Array.from(model.geom_quat.slice(4 * i, 4 * i + 4));
+        this.gripHands.push({ mesh, original: geo, grip: paddleGripGeometry(geo, gp, gq),
+          second: this.bodyName(model, gbody[i]).startsWith('r2_') });
+      }
       if (gbody[i] > 0 && this.bodyName(model, gbody[i]) === 'basketball') {
         this.ballMesh = mesh;
         this.addBallSeams(mesh);
@@ -146,6 +156,13 @@ export class MujocoVisualizer {
     mesh.matrixAutoUpdate = false;
     mesh.matrix.identity();
     scene.add(mesh);
+  }
+
+  setSportMode(mode) {
+    for (const hand of this.gripHands) {
+      const holding = mode === 'duel' || (mode === 'pingpong' && !hand.second);
+      hand.mesh.geometry = holding ? hand.grip : hand.original;
+    }
   }
 
   update(data) {

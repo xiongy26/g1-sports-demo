@@ -15,8 +15,9 @@ const READY = [
 const SWING_T = 0.62, CONTACT_FRAC = 0.55;
 const CONTACT_BLEND_T = 0.12;   // 击球前把球吸附到拍面的时间窗
 
-// 球拍相对右手腕(right_wrist_yaw_link)的安装位姿（正手握拍，掌面法向 = 腕系 -y）
-const PADDLE_OFFSET = [0.115, -0.022, 0.008]; // 拍心：掌面平面处、掌心略前
+// 拍柄沿拍面内的 -y 延伸，对应腕系 -z；握柄横过收拢的手指。
+// 真实掌面是腕系 +y；黑色击球面朝 -y，红面朝掌心。
+export const PADDLE_OFFSET = [0.105, 0.025, 0.140]; // 拍柄中段在腕系 [0.105, 0.025, 0.015]
 const BALL_R = 0.02, BLADE_HALF_T = 0.008;
 
 // 单人模式对打关键点（世界系）：发球机 -> 弹跳 -> 机器人正手 -> 弹跳 -> 发球机
@@ -304,8 +305,8 @@ export class DuelController {
 
     if (this.state === 'serve') {
       // 发球：球托在二号机拍面上，随后从拍面击出
-      this.writeBall(this.bots[1].paddleFacePoint());
       this.bots.forEach((b) => b.step(dt));
+      this.writeBall(this.bots[1].paddleFacePoint());
       if (this.tState > 0.7) {
         this.state = 'rally';
         this.leg = 0; this.legT = 0;

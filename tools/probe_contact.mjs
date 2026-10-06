@@ -101,7 +101,7 @@ function resetMode(m) {
   setBasePose(data, 0, 0, -5, 0, model.jnt_qposadr[jq], model.jnt_dofadr[jq]);
 }
 
-// ---------- HOME 姿态下确认掌心朝向（右臂自然下垂，掌心应朝大腿 = 世界 -y） ----------
+// ---------- HOME 手系轴；真实掌面为局部 +y（手指弯曲侧） ----------
 console.log('\n== HOME(篮球 reset) 姿态下右手轴向（世界系） ==');
 resetMode('basketball');
 mujoco.mj_forward(model, data);
@@ -231,7 +231,7 @@ for (let i = 0; i < 4 / TIMESTEP; i++) {
   if (prevState === 'windup' && bb.state === 'flight' && prevBall) {
     // 出手瞬间：掌面法向 vs 出球速度方向
     const v = [(ball[0]-prevBall[0])/TIMESTEP, (ball[1]-prevBall[1])/TIMESTEP, (ball[2]-prevBall[2])/TIMESTEP];
-    const nrm = norm(quatRotVec(bodyFrame(env.wristBid).q, [0, -1, 0]));
+    const nrm = norm(quatRotVec(bodyFrame(env.wristBid).q, [0, 1, 0]));
     console.log(`  出手瞬间: 掌面法向(世界)= [${nrm.map(x=>x.toFixed(2)).join(', ')}]  出球速度= [${v.map(x=>x.toFixed(2)).join(', ')}]  夹角=${angleDeg(nrm, norm(v)).toFixed(1)}°`);
   }
   prevState = bb.state; prevBall = ball.slice();
